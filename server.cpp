@@ -9,6 +9,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <vector>
 
 using std::vector;
@@ -23,7 +24,7 @@ typedef struct sockaddr SA;
 void not_found(int client);
 int open_listenfd(int port);
 int get_line(int, char *, int);
-int doit(int);
+void* doit(void* arg);
 void serve_get(int, string);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
                  char *longmsg);
@@ -100,14 +101,15 @@ int get_line(int sock, char *buf, int size) {
     return (i);
 }
 
-int doit(int fd) {
+void* doit(void* arg) {
     char buf[MAXLINE];
-    if (get_line(fd, buf, MAXLINE) == 0)
-        return -1;
+    int fd = *((int*)arg);
+    pthread_detach(pthread_self());
+    free(arg);
+    get_line(fd, buf, MAXLINE) ;
     char method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     sscanf(buf, "%s %s %s", method, uri, version);
     get_line(fd, buf, MAXLINE);
-
     int n = 0;
     do {
         n = get_line(fd, buf, MAXLINE);
@@ -121,8 +123,8 @@ int doit(int fd) {
     } else
         clienterror(fd, method, "501", "Not Implemented",
                     "Tiny does not implement this method");
-
-    return 0;
+    close(fd);
+    //return NULL;
 }
 
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
@@ -139,11 +141,7 @@ void serve_get(int fd, string uri) {
         auto ptr = uri.find("?");
         if (ptr != string::npos) {
             cgiargs = string(uri.begin() + ptr + 1, uri.end());
-            uri = str
-
-
-
-                  ing(uri.begin(), uri.begin() + ptr);
+            uri = string(uri.begin(), uri.begin() + ptr);
         } else
             cgiargs = "";
         filename = "." + uri;
@@ -219,15 +217,18 @@ int main(int argc, char **argv) {
         exit(0);
     }
 
-
+    pthread_t tid;
 
     while (true) {
         sockaddr_in cliaddr;
         socklen_t len;
         int fd = accept(listenfd, (sockaddr*)&cliaddr, &len);
         if(fd > 0) {
-            doit(fd);
-            close(fd);
+            int* pfd = (int*)malloc(sizeof(int));
+            *pfd = fd;
+
+            int n;
+            pthread_create(&tid, NULL, doit, pfd);
         }
         else {
             fprintf(stderr, "%s\n", strerror(errno));
